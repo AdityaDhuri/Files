@@ -1,0 +1,11 @@
+sudo apt update
+sudo apt install software-properties-common
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install python3.9
+python3.9 --version       # Check python version
+sudo apt install python3.9-distutils  # This may be necessary for some distributions
+wget https://bootstrap.pypa.io/get-pip.py
+sudo python3.9 get-pip.py # Install pip
+python3.9 -m venv venv    # Create a virtual environment
+source venv/bin/activate  # Activate the virtual environment
