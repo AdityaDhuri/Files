@@ -1,0 +1,130 @@
+import os
+import time
+import logging
+import paramiko
+import pandas as pd
+from datetime import datetime
+from stat import S_ISDIR, S_ISREG
+
+
+class SFTPAdapter:
+    def __init__(self):
+        self.type1, self.ip_address, self.port, self.username, self.password, self.local_folder, self.remote_folder, self.mapping, self.private_key, self.max_retries,self.retry_interval  = None, None, None, None, None, None, None, None, None, None, None
+        self.timeout = 0
+
+    def download_file(self, sftp, remotepath, localpath, filename1):
+        try:
+            sftp.get(remotepath, localpath)
+            logging.info(f'Successfully Downloaded File {filename1}')
+
+        except Exception as e:
+            logging.error(f'Error in Downloading : {filename1}, Error : {e}')
+
+    def download_folder(self, local_folder, remote_folder, sftp):
+        try:
+            for item in sftp.listdir_attr(remote_folder):
+                remote_path = f"{remote_folder}/{item.filename}"
+                local_path = os.path.join(local_folder, item.filename)
+
+                if S_ISDIR(item.st_mode):
+                    os.makedirs(local_path, exist_ok=True)
+                    self.download_folder(local_path, remote_path, sftp)
+                    logging.info(f"Folder Downloaded : {item.filename}")
+
+                elif S_ISREG(item.st_mode):
+                    self.download_file(sftp, remote_path, local_path, item.filename)
+
+        except Exception as e:
+            logging.error(f'Error in downloading {item.filename} : Error :{e}')
+
+    def parameters_sftp(self, config):
+        try:
+            self.type1 = config['type']
+            self.ip_address = config['ip_address']
+            self.port = int(config['port'])
+            self.username = config['username']
+            self.password = config['password']
+            self.local_folder = config['destination_folder_location']
+            self.remote_folder = config['remote_folder_location']
+            self.mapping = config['file_and_folder_mapping']
+            self.private_key = config['private_key']
+            self.max_retries = int(config['retry'])
+            self.retry_interval = int(config['retry_interval'])
+
+        except Exception as e:
+            logging.error(f'Error in Parameter in json : {e}')
+
+    def connect(self):
+        try:
+            while self.timeout < self.max_retries:
+                try:
+                    self.transport = paramiko.Transport((self.ip_address, self.port))
+
+                    if len(self.private_key) > 1:
+                        self.transport.connect(username=self.username, password=self.password, pkey=self.private_key)
+                    else:
+                        self.transport.connect(username=self.username, password=self.password)
+
+                    self.sftp = paramiko.SFTPClient.from_transport(self.transport)
+                    logging.info('Successfully connected with SFTP')
+                    break
+
+                except Exception as e:
+                    self.timeout += 1
+                    logging.error(f"Timeout connection. Retrying {self.timeout}/{self.max_retries}. Error: {e}")
+
+                    if self.timeout < self.max_retries:
+                        time.sleep(self.retry_interval)
+
+            if self.timeout == self.max_retries:
+                logging.error("Maximum retries reached. Unable to establish a connection.")
+        except Exception as e:
+            logging.error(f"Exception during connection, {e}")
+
+    def disconnect(self):
+        try:
+            self.sftp.close()
+            self.transport.close()
+            logging.shutdown()
+            logging.info(f"Connection is disconnected successfully")
+        except Exception as e:
+            logging.error(f"The Connection did not disconnect, {e}")
+
+    def execute(self):
+        try:
+            if not self.mapping:
+                remote_folder_path = self.remote_folder
+                destination_folder_path = self.local_folder
+
+                try:
+                    self.download_folder(destination_folder_path, remote_folder_path, self.sftp)
+                except IOError as e:
+                    logging.error(f"Remote folder {remote_folder_path} does not exist: {e}")
+            else:
+                for key, value in self.mapping.items():
+                    print(key,value)
+                    if "filename" in key:
+                        remote_file_path = f"{self.remote_folder}/{value}"
+                        local_file_path = f"{self.local_folder}"
+                        self.download_file(self.sftp, remote_file_path, local_file_path, value)
+                    else:
+                        remote_folder_path = f"{self.remote_folder}/{key}"
+                        destination_folder_path = os.path.join(self.local_folder, value)
+                        try:
+                            self.sftp.listdir(remote_folder_path)
+                            if os.path.exists(destination_folder_path):
+                                print(f"Destination folder '{value}' exists. Appending to it.")
+                            else:
+                                print(f"Destination folder '{value}' does not exist. Creating it.")
+                                os.makedirs(destination_folder_path)
+
+                            self.download_folder(destination_folder_path, remote_folder_path, self.sftp)
+
+                        except IOError as e:
+                            logging.error(f"Remote folder '{key}' does not exist: {e}")
+
+
+            print("DONE")
+        except Exception as e:
+            logging.error(f"Error downloading file: {e}")
+
